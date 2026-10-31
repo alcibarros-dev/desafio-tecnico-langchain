@@ -1,3 +1,11 @@
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnableLambda, RunnablePassthrough
+
+from config import SetupError, get_llm, get_vector_store
+
+TOP_K = 10
+
 PROMPT_TEMPLATE = """
 CONTEXTO:
 {contexto}
@@ -25,5 +33,29 @@ PERGUNTA DO USUÁRIO:
 RESPONDA A "PERGUNTA DO USUÁRIO"
 """
 
+
 def search_prompt(question=None):
-    pass
+    """Monta a chain de RAG. Com `question`, já devolve a resposta; sem, devolve a chain."""
+    try:
+        store = get_vector_store()
+        llm = get_llm()
+    except SetupError as e:
+        print(f"Erro: {e}")
+        return None
+
+    def retrieve_context(pergunta):
+        results = store.similarity_search_with_score(pergunta, k=TOP_K)
+        return "\n\n".join(doc.page_content for doc, _score in results)
+
+    prompt = PromptTemplate.from_template(PROMPT_TEMPLATE)
+
+    chain = (
+        {"contexto": RunnableLambda(retrieve_context), "pergunta": RunnablePassthrough()}
+        | prompt
+        | llm
+        | StrOutputParser()
+    )
+
+    if question is not None:
+        return chain.invoke(question)
+    return chain
